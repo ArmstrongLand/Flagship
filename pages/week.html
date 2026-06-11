@@ -72,6 +72,7 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
   <button id="back-btn">‹</button>
   <select id="hood-select"><option value="">Loading…</option></select>
   <div id="progress-pill">0 / 0</div>
+  <button id="view-toggle-btn" style="height:30px;padding:0 10px;border:1px solid rgba(200,169,110,0.4);border-radius:7px;background:rgba(200,169,110,0.12);font-size:11px;font-weight:500;cursor:pointer;color:var(--gold-lt);white-space:nowrap;flex-shrink:0">☰ List</button>
   <button id="edit-map-btn" style="display:none">✏️ Edit</button>
   <button class="tsm pri" id="submit-btn">Submit</button>
   <button id="more-btn">⋯</button>
@@ -82,12 +83,19 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
 </div>
 <div id="prog-bar-wrap"><div id="prog-bar-fill"></div></div>
 
+<!-- LIST VIEW PANEL -->
+<div id="list-view" style="display:none;flex:1;overflow-y:auto;padding:10px 12px 40px;background:var(--cream)">
+  <div id="list-lots"></div>
+</div>
+
 <div id="map-wrap">
   <svg id="map-svg" xmlns="http://www.w3.org/2000/svg">
     <g id="g-roads"></g>
     <g id="g-lots"></g>
     <g id="g-labels"></g>
   </svg>
+  <!-- HTML tap overlay — sits on top of SVG, handles iOS touch reliably -->
+  <div id="tap-overlay" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
   <div id="empty-state" style="display:none">
     <div class="empty-icon">🗺️</div>
     <h2>No map published yet</h2>
@@ -267,6 +275,7 @@ function applyVP(){
 function clampVP(){
   vs=Math.max(0.1,Math.min(8,vs));
   applyVP();
+  if(hoodData) buildTapOverlay((hoodData.E&&hoodData.E.lots)||[]);
 }
 function recenter(){
   if(!hoodData)return;
@@ -333,6 +342,7 @@ function polyPath(pts){
 }
 
 function renderMap(){
+  if(viewMode==='list'){ renderList(); return; }
   if(!hoodData)return;
   var E=hoodData.E||{roads:[],lots:[],labels:[]};
   var gr=document.getElementById('g-roads');
@@ -399,6 +409,49 @@ function renderMap(){
   (E.labels||[]).forEach(function(lb){
     mk('text',{x:lb.x,y:lb.y,'font-size':'9',fill:'#1a1a18','font-weight':'600'},glab).textContent=lb.text;
   });
+
+  buildTapOverlay(E.lots||[]);
+}
+
+// Build absolutely-positioned HTML divs over each lot for reliable iOS tap
+function buildTapOverlay(lots){
+  var overlay=document.getElementById('tap-overlay');
+  overlay.innerHTML='';
+  var svgRect=document.getElementById('map-svg').getBoundingClientRect();
+  var wrapRect=document.getElementById('map-wrap').getBoundingClientRect();
+  lots.forEach(function(l){
+    if(!l.pts||!l.pts.length||isSold(l.id))return;
+    // Get bounding box of lot in screen coords
+    var minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    l.pts.forEach(function(p){
+      var sx=p.x*vs+vx; var sy=p.y*vs+vy;
+      minX=Math.min(minX,sx); maxX=Math.max(maxX,sx);
+      minY=Math.min(minY,sy); maxY=Math.max(maxY,sy);
+    });
+    // Position relative to map-wrap
+    var div=document.createElement('div');
+    div.style.cssText='position:absolute;left:'+minX+'px;top:'+minY+'px;width:'+(maxX-minX)+'px;height:'+(maxY-minY)+'px;pointer-events:auto;cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,0);';
+    div.setAttribute('data-lot-id',l.id);
+    div.setAttribute('data-lot-label',l.lot||l.id);
+    div.addEventListener('touchend',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      var lotId=this.getAttribute('data-lot-id');
+      var lotLabel=this.getAttribute('data-lot-label');
+      toggleDone(lotId);
+      renderMap(); updateProgress();
+      showToast(isDone(lotId)?'✓ Lot '+lotLabel+' done':'Lot '+lotLabel+' unmarked');
+    });
+    div.addEventListener('click',function(e){
+      e.stopPropagation();
+      var lotId=this.getAttribute('data-lot-id');
+      var lotLabel=this.getAttribute('data-lot-label');
+      toggleDone(lotId);
+      renderMap(); updateProgress();
+      showToast(isDone(lotId)?'✓ Lot '+lotLabel+' done':'Lot '+lotLabel+' unmarked');
+    });
+    overlay.appendChild(div);
+  });
 }
 
 // ── PROGRESS ──
@@ -410,6 +463,46 @@ function updateProgress(){
   document.getElementById('progress-pill').textContent=doneCount+' / '+total;
   var pct=total?Math.round(doneCount/total*100):0;
   document.getElementById('prog-bar-fill').style.width=pct+'%';
+}
+
+// ── VIEW TOGGLE ──
+var viewMode = 'map'; // 'map' or 'list'
+document.getElementById('view-toggle-btn').addEventListener('click', function(){
+  viewMode = viewMode === 'map' ? 'list' : 'map';
+  document.getElementById('view-toggle-btn').textContent = viewMode === 'map' ? '☰ List' : '🗺 Map';
+  document.getElementById('map-wrap').style.display = viewMode === 'map' ? '' : 'none';
+  document.getElementById('list-view').style.display = viewMode === 'list' ? 'flex' : 'none';
+  if(viewMode === 'list') renderList();
+});
+
+function renderList(){
+  var container = document.getElementById('list-lots');
+  container.innerHTML = '';
+  if(!hoodData) return;
+  var E = hoodData.E||{};
+  var lots = (E.lots||[]).filter(function(l){ return !isSold(l.id); });
+  if(!lots.length){ container.innerHTML='<p style="text-align:center;color:var(--gray);padding:40px">No active lots</p>'; return; }
+  // Sort by lot number
+  lots = lots.slice().sort(function(a,b){ return (parseInt(a.lot)||0)-(parseInt(b.lot)||0); });
+  lots.forEach(function(l){
+    var done_ = isDone(l.id);
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;background:'+(done_?'#eaf2ed':'#fff')+';border-radius:10px;padding:14px 14px;margin-bottom:8px;box-shadow:0 2px 8px rgba(27,42,59,0.07);border:2px solid '+(done_?'#2D5A3D':'transparent')+';cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none';
+    row.innerHTML =
+      '<div style="width:36px;height:36px;border-radius:50%;border:2px solid '+(done_?'#2D5A3D':'#c8c4b8')+';background:'+(done_?'#2D5A3D':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;color:#fff">'+(done_?'✓':'')+'</div>'+
+      '<div style="flex:1;margin-left:12px">'+
+        '<div style="font-size:15px;font-weight:600;color:'+(done_?'#2D5A3D':'var(--navy)')+'">Lot '+l.lot+'</div>'+
+        (l.house?'<div style="font-size:12px;color:var(--gray);margin-top:1px">'+l.house+'</div>':'')+
+      '</div>'+
+      '<div style="font-size:12px;font-weight:500;color:'+(done_?'#2D5A3D':'var(--gray)')+'">'+( done_?'Done':'Tap to mark')+'</div>';
+    row.addEventListener('click', function(){
+      toggleDone(l.id);
+      renderList();
+      updateProgress();
+      showToast(isDone(l.id)?'✓ Lot '+l.lot+' done':'Lot '+l.lot+' unmarked');
+    });
+    container.appendChild(row);
+  });
 }
 
 // ── TOAST ──
