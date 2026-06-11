@@ -433,9 +433,11 @@ function buildTapOverlay(lots){
     div.style.cssText='position:absolute;left:'+minX+'px;top:'+minY+'px;width:'+(maxX-minX)+'px;height:'+(maxY-minY)+'px;pointer-events:auto;cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,0);';
     div.setAttribute('data-lot-id',l.id);
     div.setAttribute('data-lot-label',l.lot||l.id);
+    var handled=false;
     div.addEventListener('touchend',function(e){
       e.preventDefault();
       e.stopPropagation();
+      handled=true;
       var lotId=this.getAttribute('data-lot-id');
       var lotLabel=this.getAttribute('data-lot-label');
       toggleDone(lotId);
@@ -444,6 +446,7 @@ function buildTapOverlay(lots){
     });
     div.addEventListener('click',function(e){
       e.stopPropagation();
+      if(handled){handled=false;return;}
       var lotId=this.getAttribute('data-lot-id');
       var lotLabel=this.getAttribute('data-lot-label');
       toggleDone(lotId);
