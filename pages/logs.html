@@ -76,7 +76,95 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
   <div id="log-list"></div>
 </div>
 
-<script src="db.js"></script>
+<script>
+// ── Firebase Realtime Database helper ──
+// Firebase Realtime Database helper
+
+const FIREBASE_URL = 'https://flagstaff-armstrong-default-rtdb.firebaseio.com';
+
+const DB = {
+  // ── LOW LEVEL ──
+  async get(path) {
+    const r = await fetch(`${FIREBASE_URL}/${path}.json`);
+    if (!r.ok) throw new Error('DB get failed: ' + r.status);
+    return r.json();
+  },
+  async set(path, data) {
+    const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!r.ok) throw new Error('DB set failed: ' + r.status);
+    return r.json();
+  },
+  async patch(path, data) {
+    const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!r.ok) throw new Error('DB patch failed: ' + r.status);
+    return r.json();
+  },
+  async del(path) {
+    const r = await fetch(`${FIREBASE_URL}/${path}.json`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('DB delete failed: ' + r.status);
+    return r.json();
+  },
+
+  // ── NEIGHBORHOODS (published maps) ──
+  async getNeighborhoods() {
+    const data = await this.get('neighborhoods');
+    return data || {};
+  },
+  async saveNeighborhood(name, mapData) {
+    await this.set(`neighborhoods/${encodeKey(name)}`, { name, data: mapData, updatedAt: Date.now() });
+  },
+  async getNeighborhood(name) {
+    const d = await this.get(`neighborhoods/${encodeKey(name)}`);
+    return d ? d.data : null;
+  },
+
+  // ── SOLD LOTS ──
+  async getSold() {
+    const data = await this.get('sold');
+    return data || {};
+  },
+  async setSoldForHood(hood, lotIds) {
+    await this.set(`sold/${encodeKey(hood)}`, lotIds);
+  },
+
+  // ── WEEK DONE STATE ──
+  async getDone() {
+    const data = await this.get('done');
+    return data || {};
+  },
+  async setDoneForHood(hood, lotIds) {
+    await this.set(`done/${encodeKey(hood)}`, lotIds);
+  },
+
+  // ── WEEK LOGS ──
+  async getLogs() {
+    const data = await this.get('logs');
+    if (!data) return [];
+    // Firebase returns object with keys, convert to array sorted newest first
+    return Object.values(data).sort((a, b) => b.id - a.id);
+  },
+  async addLog(entry) {
+    await this.set(`logs/${entry.id}`, entry);
+  },
+  async deleteLog(id) {
+    await this.del(`logs/${id}`);
+  }
+};
+
+function encodeKey(str) {
+  // Firebase keys can't have . # $ [ ]
+  return str.replace(/[.#$[\]]/g, '_');
+}
+
+</script>
 <script>
 (function(){
 
@@ -151,13 +239,36 @@ function render(){
     var exportWeekBtn=document.createElement('button');
     exportWeekBtn.textContent='⬇';
     exportWeekBtn.title='Export this week';
-    exportWeekBtn.style.cssText='height:28px;padding:0 9px;border:1px solid var(--gold);border-radius:7px;background:transparent;color:var(--gold);font-size:13px;cursor:pointer;margin-right:8px;flex-shrink:0';
+    exportWeekBtn.style.cssText='height:28px;padding:0 9px;border:1px solid var(--gold);border-radius:7px;background:transparent;color:var(--gold);font-size:13px;cursor:pointer;margin-right:4px;flex-shrink:0';
     exportWeekBtn.addEventListener('click',function(e){
       e.stopPropagation();
       exportSingleWeek(entry, filteredHoods);
     });
 
-    hdr.insertBefore(exportWeekBtn, hdr.querySelector('.week-chevron'));
+    var deleteBtn=document.createElement('button');
+    deleteBtn.textContent='🗑';
+    deleteBtn.title='Delete this log';
+    deleteBtn.style.cssText='height:28px;padding:0 9px;border:1px solid #f5c0bc;border-radius:7px;background:transparent;color:#c0392b;font-size:13px;cursor:pointer;margin-right:8px;flex-shrink:0';
+    (function(entryId, btn){
+      var confirming=false;
+      btn.addEventListener('click',function(e){
+        e.stopPropagation();
+        if(!confirming){
+          confirming=true;
+          btn.textContent='Sure?';
+          btn.style.background='#fff0ef';
+          setTimeout(function(){ confirming=false; btn.textContent='🗑'; btn.style.background='transparent'; },2500);
+          return;
+        }
+        DB.deleteLog(entryId).then(function(){
+          _allLogs=_allLogs.filter(function(l){ return l.id!==entryId; });
+          render();
+        }).catch(function(){ alert('Delete failed.'); });
+      });
+    })(entry.id, deleteBtn);
+
+    hdr.insertBefore(deleteBtn, hdr.querySelector('.week-chevron'));
+    hdr.insertBefore(exportWeekBtn, deleteBtn);
     hdr.addEventListener('click',function(){ card.classList.toggle('open'); });
     card.appendChild(hdr);
 
