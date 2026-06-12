@@ -603,7 +603,9 @@ function confirmSubmit(){
   var isoDate=today.toISOString().split('T')[0];
   Promise.all(hoods.map(function(name){
     return DB.getNeighborhood(name).then(function(data){
-      var lots=(data&&data.E&&data.E.lots)||[], doneIds=done[name]||[];
+      var allLots=(data&&data.E&&data.E.lots)||[];
+      var lots=allLots.filter(function(l){ return !((soldCache[name]||[]).indexOf(l.id)!==-1); });
+      var doneIds=done[name]||[];
       return{name:name,lots:lots.map(function(l){return{lot:l.lot||l.id,house:l.house||'',done:doneIds.indexOf(l.id)!==-1};}),doneCount:doneIds.length,total:lots.length};
     });
   })).then(function(nd){
