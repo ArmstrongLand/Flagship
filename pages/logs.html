@@ -183,22 +183,6 @@ function fmtDate(entry){
   }catch(e){ return entry.date||''; }
 }
 
-var _soldCache=null;
-function getSold(){
-  return _soldCache||{};
-}
-var _hoodCache={};
-function isLotSold(hoodName, lotNum){
-  try{
-    var data=_hoodCache[hoodName];
-    if(!data)return false;
-    var sold=getSold();
-    var soldIds=sold[hoodName]||[];
-    var lot=(data.E&&data.E.lots||[]).find(function(l){ return l.lot===lotNum; });
-    return lot ? soldIds.indexOf(lot.id)!==-1 : false;
-  }catch(e){ return false; }
-}
-
 function render(){
   var logs=_allLogs||[];
   var list=document.getElementById('log-list');
@@ -212,10 +196,8 @@ function render(){
   logs.forEach(function(entry){
     var hoods=entry.neighborhoods||[];
 
-    // Filter sold lots out of display
-    var filteredHoods=hoods.map(function(h){
-      return Object.assign({},h,{lots:(h.lots||[]).filter(function(l){ return !isLotSold(h.name,l.lot); })});
-    });
+    // Show logs exactly as submitted — no sold filtering on past logs
+    var filteredHoods=hoods;
 
     var totalDone=filteredHoods.reduce(function(s,h){return s+h.lots.filter(function(l){return l.done;}).length;},0);
     var totalLots=filteredHoods.reduce(function(s,h){return s+h.lots.length;},0);
@@ -249,7 +231,7 @@ function render(){
     hdr.addEventListener('click',function(){ card.classList.toggle('open'); });
     card.appendChild(hdr);
 
-    // Detail tables (sold lots already filtered out)
+    // Detail tables — exact snapshot from submission
     var detail=document.createElement('div');
     detail.className='week-detail';
     var tablesWrap=document.createElement('div');
@@ -373,10 +355,8 @@ function exportCSV(){
   var allRows=[];
   logs.forEach(function(entry){
     var hoods=entry.neighborhoods||[];
-    var filtered=hoods.map(function(h){
-      return Object.assign({},h,{lots:(h.lots||[]).filter(function(l){ return !isLotSold(h.name,l.lot); })});
-    });
-    allRows=allRows.concat(buildCSVRows(entry,filtered));
+    // Export exactly as submitted — no sold filtering
+    allRows=allRows.concat(buildCSVRows(entry,hoods));
   });
   var csv=rowsToCSV(allRows);
   var blob=new Blob([csv],{type:'text/csv'});
@@ -392,10 +372,7 @@ document.getElementById('more-btn').addEventListener('click',function(e){ e.stop
 document.getElementById('mm-export').addEventListener('click',function(){ document.getElementById('more-menu').classList.remove('open'); exportCSV(); });
 document.addEventListener('click',function(){ document.getElementById('more-menu').classList.remove('open'); });
 
-DB.getSold().then(function(s){ _soldCache=s||{}; return DB.getNeighborhoods(); }).then(function(hoods){
-  var names=Object.values(hoods||{}).map(function(h){return h.name;});
-  return Promise.all(names.map(function(n){ return DB.getNeighborhood(n).then(function(d){ _hoodCache[n]=d; }); }));
-}).then(function(){ return DB.getLogs(); }).then(function(logs){ _allLogs=logs; render(); }).catch(function(){ render(); });
+DB.getLogs().then(function(logs){ _allLogs=logs; render(); }).catch(function(){ render(); });
 var _allLogs=[];
 
 })();
